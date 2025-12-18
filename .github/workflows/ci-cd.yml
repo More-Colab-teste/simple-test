@@ -4,14 +4,11 @@ on:
   push:
     branches:
       - production
-  pull_request:
-    branches:
-      - production
 
 jobs:
-  ci:
-    name: Continuous Integration
-    runs-on: ubuntu-latest
+  deploy:
+    name: Deploy to self-hosted runner
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
@@ -25,42 +22,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm test
+      - name: Start/restart app with PM2
+        run: |
+          APP_DIR=/home/ubuntu/BIOma/simple-test
 
-  cd:
-    name: Continuous Deployment
-    needs: ci
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/production'
+          # If folder doesn't exist, clone repo
+          if [ ! -d "$APP_DIR" ]; then
+            mkdir -p $APP_DIR
+            git clone https://github.com/${{ github.repository }} $APP_DIR
+          fi
 
-    steps:
-      - name: Deploy to server
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ubuntu
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            set -e
+          cd $APP_DIR
+          git fetch origin
+          git checkout production
+          git reset --hard origin/production
 
-            APP_DIR=/home/ubuntu/simple-test
+          # Install dependencies
+          npm ci
 
-            # If the app folder doesn't exist, clone repo
-            if [ ! -d "$APP_DIR" ]; then
-              mkdir -p $APP_DIR
-              cd $APP_DIR
-              git clone https://github.com/${{ github.repository }} .
-            else
-              cd $APP_DIR
-              git fetch origin
-              git checkout production
-              git pull origin production
-            fi
-
-            # Install dependencies
-            npm ci
-
-            # Start or restart app with PM2
-            pm2 start app.js --name simple-test || pm2 restart simple-test
-            pm2 save
+          # Start/restart app using PM2
+          pm2 start app.js --name simple-test || pm2 restart simple-test
+          pm2 save
